@@ -31,7 +31,7 @@ class SimpleGarageDoorOpener {
     this.informationService
       .setCharacteristic(Characteristic.Manufacturer, 'Simple Garage Door')
       .setCharacteristic(Characteristic.Model, 'A Remote Control')
-      .setCharacteristic(Characteristic.SerialNumber, '0711');
+      .setCharacteristic(Characteristic.SerialNumber, '0712');
   }
 
   getServices () {
@@ -39,47 +39,78 @@ class SimpleGarageDoorOpener {
   }
 
   setupGarageDoorOpenerService (service) {
-    rpio.open(this.doorSwitchPin, rpio.OUTPUT, rpio.LOW);
 
     this.service.setCharacteristic(Characteristic.TargetDoorState, Characteristic.TargetDoorState.CLOSED);
     this.service.setCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.CLOSED);
-
+    
     service.getCharacteristic(Characteristic.TargetDoorState)
       .on('get', (callback) => {
         var targetDoorState = service.getCharacteristic(Characteristic.TargetDoorState).value;
-        if (targetDoorState === Characteristic.TargetDoorState.OPEN && ((new Date() - this.lastOpened) >= (this.closeAfter * 1000))) {
-          this.log('Setting TargetDoorState -> CLOSED');
-          callback(null, Characteristic.TargetDoorState.CLOSED);
-        } else {
-          callback(null, targetDoorState);
-        }
+        callback(null, targetDoorState);
       })
       .on('set', (value, callback) => {
+        var currentDoorState = service.getCharacteristic(Characteristic.CurrentDoorState).value;
+
         if (value === Characteristic.TargetDoorState.OPEN) {
-          this.lastOpened = new Date();
-          switch (service.getCharacteristic(Characteristic.CurrentDoorState).value) {
+          switch (currentDoorState) {
             case Characteristic.CurrentDoorState.CLOSED:
-            case Characteristic.CurrentDoorState.CLOSING:
+              this.openGarageDoor(callback);
+              break;
+	    case Characteristic.CurrentDoorState.STOPPED:
+	      this.openGarageDoor(callback);
+              break;
+	    case Characteristic.CurrentDoorState.OPEN:
+              this.log('Current state open');
+              this.closeGarageDoor(callback);
+              break;
+
+            default:
+              callback();
+          }
+        }
+        if (value === Characteristic.TargetDoorState.CLOSED) {
+          this.log('Target Close');
+          switch (currentDoorState) {
             case Characteristic.CurrentDoorState.OPEN:
+	      this.log('Current state open');
+	      this.closeGarageDoor(callback);
+              break;
+            case Characteristic.CurrentDoorState.STOPPED:
+              this.log('Current state stopped');
+              this.closeGarageDoor(callback);
+              break;
+	    case Characteristic.CurrentDoorState.CLOSED:
               this.openGarageDoor(callback);
               break;
             default:
               callback();
           }
-        } else {
-          callback();
         }
       });
   }
 
   openGarageDoor (callback) {
-    rpio.write(this.doorSwitchPin, rpio.HIGH);
-    rpio.sleep(0.5);
-    rpio.write(this.doorSwitchPin, rpio.LOW);
-
     this.log('Opening the garage door for...');
+    this.signalCall();
     this.simulateGarageDoorOpening();
     callback();
+  }
+
+  closeGarageDoor(callback) {
+    this.log('Closing the garage door for...');
+    this.signalCall();
+    this.simulateGarageDoorClosing();
+    callback();
+  }
+
+  signalCall () {
+    this.log('Starting signal');
+    rpio.open(this.doorSwitchPin, rpio.OUTPUT, rpio.LOW);
+    rpio.write(this.doorSwitchPin, rpio.HIGH);
+    rpio.sleep(1);
+    rpio.write(this.doorSwitchPin, rpio.LOW);
+    rpio.close(this.doorSwitchPin, rpio.PIN_RESET);
+    this.log('Signal ended successfully');
   }
 
 
@@ -87,13 +118,14 @@ class SimpleGarageDoorOpener {
     this.service.setCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.OPENING);
     setTimeout(() => {
       this.service.setCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.OPEN);
-      setTimeout(() => {
-        this.service.setCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.CLOSING);
-        this.service.setCharacteristic(Characteristic.TargetDoorState, Characteristic.TargetDoorState.CLOSED);
-        setTimeout(() => {
-          this.service.setCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.CLOSED);
-        }, this.simulateTimeClosing * 1000);
-      }, this.simulateTimeOpen * 1000);
     }, this.simulateTimeOpening * 1000);
   }
+
+  simulateGarageDoorClosing () {
+    this.service.setCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.CLOSING);
+    setTimeout(() => {
+        this.service.setCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.CLOSED);
+    }, this.simulateTimeClosing * 1000);
+  }
+
 }
